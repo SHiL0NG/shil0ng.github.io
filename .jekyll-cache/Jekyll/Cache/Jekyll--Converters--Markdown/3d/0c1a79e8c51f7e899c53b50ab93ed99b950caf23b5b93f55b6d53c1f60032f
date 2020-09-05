@@ -1,0 +1,299 @@
+I"`�<p>An event loop is an infinite loop running on a single thread for handling events that occur during the lifetime of one or more connections.</p>
+
+<!--more-->
+
+<p>Instead of assigning a thread from the thread pool for each connection, it is possible to use a single event loop working as a dispatcher to handle all incoming connections and then dispatch the tasks to corresponding worker event loops. These event loops run constantly on their own threads, thus eliminating the expenses of context switch.</p>
+
+<h3 id="organization">Organization</h3>
+
+<p>Although the Netty API seems to be very complicated, the classes/interfaces related to event loops are very well organized into two packages, <code class="language-plaintext highlighter-rouge">io.netty.util.concurrent</code> and <code class="language-plaintext highlighter-rouge">io.netty.channel</code> with a simple hierarchical dependency on <code class="language-plaintext highlighter-rouge">java.util.concurrent</code>.</p>
+
+<p>The two Netty packages have a clear boundary of functionalities. The package <code class="language-plaintext highlighter-rouge">io.netty.util.concurrent</code> takes care of the threads and provides an abstraction of the thread model, while the <code class="language-plaintext highlighter-rouge">io.netty.channel</code> takes care of the <code class="language-plaintext highlighter-rouge">Channel</code> and <code class="language-plaintext highlighter-rouge">Selector</code>.</p>
+
+<p><img src="/img/uml_event_loop.png" alt="Event Loop UML" /></p>
+
+<p>Starting from the root <code class="language-plaintext highlighter-rouge">Executor</code> to the end <code class="language-plaintext highlighter-rouge">NioEventLoop</code>, there is the inheritance path of abstract classes of executors, event loops on the left column, the interfaces in the middle, and executor groups and event loop groups on the right.</p>
+
+<h3 id="executor-framework">Executor Framework</h3>
+
+<p>The Executor Framework provided in Java is important in understanding the Netty threading model. The executor framework decouples <code class="language-plaintext highlighter-rouge">task submission</code> from <code class="language-plaintext highlighter-rouge">task execution</code>, making it possible to implement and change our execution strategies. For example, we could create an <code class="language-plaintext highlighter-rouge">ImmediateExecutor</code> which runs the task immediately in the current thread.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+<span class="kd">class</span> <span class="nc">ImmediateExecutor</span> <span class="kd">implements</span> <span class="nc">Executor</span> <span class="o">{</span>
+     <span class="kd">public</span> <span class="kt">void</span> <span class="nf">execute</span><span class="o">(</span><span class="nc">Runnable</span> <span class="n">r</span><span class="o">)</span> <span class="o">{</span>
+         <span class="n">r</span><span class="o">.</span><span class="na">run</span><span class="o">();</span>
+     <span class="o">}</span>
+<span class="o">}</span>
+ 
+</code></pre></div></div>
+
+<p>Or we could also create a new thread for each task, which is exactly the same as doing manually <code class="language-plaintext highlighter-rouge">new Thread(r).start()</code></p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">class</span> <span class="nc">ThreadPerTaskExecutor</span> <span class="kd">implements</span> <span class="nc">Executor</span> <span class="o">{</span>
+     <span class="kd">public</span> <span class="kt">void</span> <span class="nf">execute</span><span class="o">(</span><span class="nc">Runnable</span> <span class="n">r</span><span class="o">)</span> <span class="o">{</span>
+         <span class="k">new</span> <span class="nf">Thread</span><span class="o">(</span><span class="n">r</span><span class="o">).</span><span class="na">start</span><span class="o">();</span>
+     <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h3 id="eventexecutor-and-eventloop">EventExecutor and EventLoop</h3>
+
+<p>An <code class="language-plaintext highlighter-rouge">EventLoop</code> is basically an infinite loop running on a thread and takes care of the events submitted to it.</p>
+
+<h5 id="thread-binding">Thread Binding</h5>
+
+<p>The <code class="language-plaintext highlighter-rouge">SingleThreadEventExecutor</code> holds a reference to the thread which it is currently bound to, i.e. <code class="language-plaintext highlighter-rouge">thread</code>. If <code class="language-plaintext highlighter-rouge">inEventLoop</code> returns false, and it has no bound thread yet, it will start a new thread, update the <code class="language-plaintext highlighter-rouge">SingleThreadEventExecutor.thread</code> field as in <code class="language-plaintext highlighter-rouge">doStartThread</code>, and carry out the tasks in this newly bound thread.</p>
+
+<p>The code here shows, where or not there’s already an event loop thread, the task will always be added to the queue, the only difference is that, if the EventLoop is in state <code class="language-plaintext highlighter-rouge">ST_NOT_STARTED</code>, it will allocate a new thread and assign this thread to the EventLoop.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="kd">private</span> <span class="kt">void</span> <span class="nf">execute</span><span class="o">(</span><span class="nc">Runnable</span> <span class="n">task</span><span class="o">,</span> <span class="kt">boolean</span> <span class="n">immediate</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">boolean</span> <span class="n">inEventLoop</span> <span class="o">=</span> <span class="n">inEventLoop</span><span class="o">();</span>
+        <span class="n">addTask</span><span class="o">(</span><span class="n">task</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(!</span><span class="n">inEventLoop</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">startThread</span><span class="o">();</span>
+            <span class="o">...</span>
+        <span class="o">}</span>
+        <span class="o">...</span>
+    <span class="o">}</span>
+    
+    <span class="kd">private</span> <span class="kt">void</span> <span class="nf">startThread</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">state</span> <span class="o">==</span> <span class="no">ST_NOT_STARTED</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">if</span> <span class="o">(</span><span class="no">STATE_UPDATER</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="k">this</span><span class="o">,</span> <span class="no">ST_NOT_STARTED</span><span class="o">,</span> <span class="no">ST_STARTED</span><span class="o">))</span> <span class="o">{</span>
+                <span class="kt">boolean</span> <span class="n">success</span> <span class="o">=</span> <span class="kc">false</span><span class="o">;</span>
+                <span class="k">try</span> <span class="o">{</span>
+                    <span class="n">doStartThread</span><span class="o">();</span>
+                    <span class="n">success</span> <span class="o">=</span> <span class="kc">true</span><span class="o">;</span>
+                <span class="o">}</span> <span class="k">finally</span> <span class="o">{</span>
+                    <span class="k">if</span> <span class="o">(!</span><span class="n">success</span><span class="o">)</span> <span class="o">{</span>
+                        <span class="no">STATE_UPDATER</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="k">this</span><span class="o">,</span> <span class="no">ST_STARTED</span><span class="o">,</span> <span class="no">ST_NOT_STARTED</span><span class="o">);</span>
+                    <span class="o">}</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+    
+    <span class="kd">private</span> <span class="kt">void</span> <span class="nf">doStartThread</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">assert</span> <span class="n">thread</span> <span class="o">==</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="n">executor</span><span class="o">.</span><span class="na">execute</span><span class="o">(</span><span class="k">new</span> <span class="nc">Runnable</span><span class="o">()</span> <span class="o">{</span>
+            <span class="nd">@Override</span>
+            <span class="kd">public</span> <span class="kt">void</span> <span class="nf">run</span><span class="o">()</span> <span class="o">{</span>
+                <span class="n">thread</span> <span class="o">=</span> <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">();</span>
+                <span class="k">try</span> <span class="o">{</span>
+                    <span class="nc">SingleThreadEventExecutor</span><span class="o">.</span><span class="na">this</span><span class="o">.</span><span class="na">run</span><span class="o">();</span>
+                    <span class="n">success</span> <span class="o">=</span> <span class="kc">true</span><span class="o">;</span>
+                <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Throwable</span> <span class="n">t</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="na">warn</span><span class="o">(</span><span class="s">"Unexpected exception from an event executor: "</span><span class="o">,</span> <span class="n">t</span><span class="o">);</span>
+                <span class="o">}</span> <span class="k">finally</span> <span class="o">{</span>
+                    <span class="c1">// cleanup, etc</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+    
+    
+</code></pre></div></div>
+
+<p>In the <code class="language-plaintext highlighter-rouge">doStartThread</code> method of <code class="language-plaintext highlighter-rouge">SingleThreadEventExecutor</code>, we see <code class="language-plaintext highlighter-rouge">executor.execute(() -&gt; {...}</code>. Thus depending on the executor, it decides how to bind an event loop to a thread.</p>
+
+<p>If the executor is a <code class="language-plaintext highlighter-rouge">ThreadPerTaskExecutor</code>, there will be a new thread created each time the <code class="language-plaintext highlighter-rouge">doStartThread</code> is called.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// io.netty.util.concurrent.ThreadPerTaskExecutor</span>
+<span class="kd">public</span> <span class="kd">final</span> <span class="kd">class</span> <span class="nc">ThreadPerTaskExecutor</span> <span class="kd">implements</span> <span class="nc">Executor</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">ThreadFactory</span> <span class="n">threadFactory</span><span class="o">;</span>
+
+    <span class="kd">public</span> <span class="nf">ThreadPerTaskExecutor</span><span class="o">(</span><span class="nc">ThreadFactory</span> <span class="n">threadFactory</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">threadFactory</span> <span class="o">=</span> <span class="nc">ObjectUtil</span><span class="o">.</span><span class="na">checkNotNull</span><span class="o">(</span><span class="n">threadFactory</span><span class="o">,</span> <span class="s">"threadFactory"</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">execute</span><span class="o">(</span><span class="nc">Runnable</span> <span class="n">command</span><span class="o">)</span> <span class="o">{</span>
+        <span class="n">threadFactory</span><span class="o">.</span><span class="na">newThread</span><span class="o">(</span><span class="n">command</span><span class="o">).</span><span class="na">start</span><span class="o">();</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h5 id="task-handling">Task Handling</h5>
+
+<p>The <code class="language-plaintext highlighter-rouge">SingleThreadEventExecutor#run()</code> called in the <code class="language-plaintext highlighter-rouge">doStartThread</code> is an abstract method, so its subclasses can decide what they are going to do inside. For example, the <code class="language-plaintext highlighter-rouge">DefaultEventLoop</code> just keeps taking a task from the queue and runs it until <code class="language-plaintext highlighter-rouge">confirmShutDown.</code></p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+    <span class="c1">// io.netty.channel.DefaultEventLoop</span>
+    <span class="nd">@Override</span>
+    <span class="kd">protected</span> <span class="kt">void</span> <span class="nf">run</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">for</span> <span class="o">(;;)</span> <span class="o">{</span>
+            <span class="nc">Runnable</span> <span class="n">task</span> <span class="o">=</span> <span class="n">takeTask</span><span class="o">();</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">task</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">task</span><span class="o">.</span><span class="na">run</span><span class="o">();</span>
+                <span class="n">updateLastExecutionTime</span><span class="o">();</span>
+            <span class="o">}</span>
+
+            <span class="k">if</span> <span class="o">(</span><span class="n">confirmShutdown</span><span class="o">())</span> <span class="o">{</span>
+                <span class="k">break</span><span class="o">;</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+</code></pre></div></div>
+
+<p>And to deal with I/O operations, we use <code class="language-plaintext highlighter-rouge">NioEventLoop</code> which basically uses an <code class="language-plaintext highlighter-rouge">Selector</code> to <code class="language-plaintext highlighter-rouge">select</code>/<code class="language-plaintext highlighter-rouge">selectNow</code> the channels with available activities. These channels are registered to the event loop and the selector through <code class="language-plaintext highlighter-rouge">SingleThreadEventLoop#register(Channel).</code></p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="nc">ChannelFuture</span> <span class="nf">register</span><span class="o">(</span><span class="nc">Channel</span> <span class="n">channel</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="nf">register</span><span class="o">(</span><span class="k">new</span> <span class="nc">DefaultChannelPromise</span><span class="o">(</span><span class="n">channel</span><span class="o">,</span> <span class="k">this</span><span class="o">));</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="nc">ChannelFuture</span> <span class="nf">register</span><span class="o">(</span><span class="kd">final</span> <span class="nc">ChannelPromise</span> <span class="n">promise</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">ObjectUtil</span><span class="o">.</span><span class="na">checkNotNull</span><span class="o">(</span><span class="n">promise</span><span class="o">,</span> <span class="s">"promise"</span><span class="o">);</span>
+        <span class="n">promise</span><span class="o">.</span><span class="na">channel</span><span class="o">().</span><span class="na">unsafe</span><span class="o">().</span><span class="na">register</span><span class="o">(</span><span class="k">this</span><span class="o">,</span> <span class="n">promise</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">promise</span><span class="o">;</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<h3 id="eventexecutorgoup-and-eventloopgroup">EventExecutorGoup and EventLoopGroup</h3>
+
+<p>It is now clear how a single event loop works, but how the multithread environment is created? how many event loops should be created? And how is a <code class="language-plaintext highlighter-rouge">Channel</code> assigned to the event loops?</p>
+
+<h5 id="eventloop-creation">EventLoop Creation</h5>
+
+<p>The answer is that Netty manages the <code class="language-plaintext highlighter-rouge">EventLoop</code>-postfixed classes within the <code class="language-plaintext highlighter-rouge">EventLoopGroup</code>-postfixed classes.</p>
+
+<p>In the constructor of <code class="language-plaintext highlighter-rouge">MultithreadEventExecutorGroup</code>, these is <strong>no thread pool</strong> but an array of <code class="language-plaintext highlighter-rouge">EventExecutor</code>s (which is an interface of <code class="language-plaintext highlighter-rouge">EventLoop</code>) whose size is equal to the number of threads. And unless explicitly specified, the default <code class="language-plaintext highlighter-rouge">Executor</code> will be the <code class="language-plaintext highlighter-rouge">ThreadPerTaskExecutor</code>, which means, for each event loop there will be a new thread created for  it.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="kd">protected</span> <span class="nf">MultithreadEventExecutorGroup</span><span class="o">(</span><span class="kt">int</span> <span class="n">nThreads</span><span class="o">,</span> <span class="nc">Executor</span> <span class="n">executor</span><span class="o">,</span>
+                                            <span class="nc">EventExecutorChooserFactory</span> <span class="n">chooserFactory</span><span class="o">,</span> <span class="nc">Object</span><span class="o">...</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+
+        <span class="o">...</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">executor</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">executor</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ThreadPerTaskExecutor</span><span class="o">(</span><span class="n">newDefaultThreadFactory</span><span class="o">());</span>
+        <span class="o">}</span>
+
+        <span class="o">...</span> 
+        <span class="n">children</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">EventExecutor</span><span class="o">[</span><span class="n">nThreads</span><span class="o">];</span>
+
+        <span class="k">for</span> <span class="o">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="o">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">nThreads</span><span class="o">;</span> <span class="n">i</span> <span class="o">++)</span> <span class="o">{</span>
+            <span class="kt">boolean</span> <span class="n">success</span> <span class="o">=</span> <span class="kc">false</span><span class="o">;</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="n">children</span><span class="o">[</span><span class="n">i</span><span class="o">]</span> <span class="o">=</span> <span class="n">newChild</span><span class="o">(</span><span class="n">executor</span><span class="o">,</span> <span class="n">args</span><span class="o">);</span>
+                <span class="n">success</span> <span class="o">=</span> <span class="kc">true</span><span class="o">;</span>
+            <span class="o">}</span>
+            <span class="o">...</span>
+        <span class="o">}</span>
+        <span class="o">...</span>
+   <span class="o">}</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">newChild()</code> is again an abstract method whose implementation is left to its subclasses.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">protected</span> <span class="kd">abstract</span> <span class="nc">EventExecutor</span> <span class="nf">newChild</span><span class="o">(</span><span class="nc">Executor</span> <span class="n">executor</span><span class="o">,</span> <span class="nc">Object</span><span class="o">...</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Exception</span><span class="o">;</span>
+</code></pre></div></div>
+
+<p>In the <code class="language-plaintext highlighter-rouge">NioEventLoopGroup</code>, the <code class="language-plaintext highlighter-rouge">newChild</code> returns a <code class="language-plaintext highlighter-rouge">NioEventLoop.</code></p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="nd">@Override</span>
+    <span class="kd">protected</span> <span class="nc">EventLoop</span> <span class="nf">newChild</span><span class="o">(</span><span class="nc">Executor</span> <span class="n">executor</span><span class="o">,</span> <span class="nc">Object</span><span class="o">...</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+        <span class="nc">EventLoopTaskQueueFactory</span> <span class="n">queueFactory</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="na">length</span> <span class="o">==</span> <span class="mi">4</span> <span class="o">?</span> <span class="o">(</span><span class="nc">EventLoopTaskQueueFactory</span><span class="o">)</span> <span class="n">args</span><span class="o">[</span><span class="mi">3</span><span class="o">]</span> <span class="o">:</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="k">return</span> <span class="k">new</span> <span class="nf">NioEventLoop</span><span class="o">(</span><span class="k">this</span><span class="o">,</span> <span class="n">executor</span><span class="o">,</span> <span class="o">(</span><span class="nc">SelectorProvider</span><span class="o">)</span> <span class="n">args</span><span class="o">[</span><span class="mi">0</span><span class="o">],</span>
+            <span class="o">((</span><span class="nc">SelectStrategyFactory</span><span class="o">)</span> <span class="n">args</span><span class="o">[</span><span class="mi">1</span><span class="o">]).</span><span class="na">newSelectStrategy</span><span class="o">(),</span> <span class="o">(</span><span class="nc">RejectedExecutionHandler</span><span class="o">)</span> <span class="n">args</span><span class="o">[</span><span class="mi">2</span><span class="o">],</span> <span class="n">queueFactory</span><span class="o">);</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>And in <code class="language-plaintext highlighter-rouge">DefaultEventLoopGroup</code>, it returns a <code class="language-plaintext highlighter-rouge">DefaultEventLoop.</code></p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="nd">@Override</span>
+    <span class="kd">protected</span> <span class="nc">EventLoop</span> <span class="nf">newChild</span><span class="o">(</span><span class="nc">Executor</span> <span class="n">executor</span><span class="o">,</span> <span class="nc">Object</span><span class="o">...</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="k">new</span> <span class="nf">DefaultEventLoop</span><span class="o">(</span><span class="k">this</span><span class="o">,</span> <span class="n">executor</span><span class="o">);</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<h5 id="eventloop-allocation">EventLoop Allocation</h5>
+
+<p>An event loop is allocated to a channel in a round-robin fashion.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="nc">ChannelFuture</span> <span class="nf">register</span><span class="o">(</span><span class="nc">Channel</span> <span class="n">channel</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="nf">next</span><span class="o">().</span><span class="na">register</span><span class="o">(</span><span class="n">channel</span><span class="o">);</span>
+    <span class="o">}</span>
+    
+    <span class="c1">// io.netty.util.concurrent.DefaultEventExecutorChooserFactory.PowerOfTwoEventExecutorChooser</span>
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="nc">EventExecutor</span> <span class="nf">next</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="n">executors</span><span class="o">[</span><span class="n">idx</span><span class="o">.</span><span class="na">getAndIncrement</span><span class="o">()</span> <span class="o">&amp;</span> <span class="n">executors</span><span class="o">.</span><span class="na">length</span> <span class="o">-</span> <span class="mi">1</span><span class="o">];</span>
+    <span class="o">}</span>
+    
+</code></pre></div></div>
+<p>So that multiple channels can share one event loop.</p>
+
+<h3 id="application">Application</h3>
+
+<!-- ![Reactor](/img/flowchart_reactor.png) -->
+
+<p>In a typical Netty network server, we need two EventLoopGroups, one as the dispatcher (<code class="language-plaintext highlighter-rouge">bossGroup</code>) and another as the worker (<code class="language-plaintext highlighter-rouge">workerGroup</code>) to implement the <code class="language-plaintext highlighter-rouge">Reactor</code> architecture. The advantage here is that the dispatcher takes care of the incoming requests and dispatches them to the workers. The workers handle the traffic of established connections. In this way the application-specific logic is separated from the dispatcher implementation. Usually it’s enough to use only one thread for the dispatcher.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">DiscardServer</span> <span class="o">{</span>
+    
+    <span class="kd">private</span> <span class="kt">int</span> <span class="n">port</span><span class="o">;</span>
+    
+    <span class="kd">public</span> <span class="nf">DiscardServer</span><span class="o">(</span><span class="kt">int</span> <span class="n">port</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">port</span> <span class="o">=</span> <span class="n">port</span><span class="o">;</span>
+    <span class="o">}</span>
+    
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">run</span><span class="o">()</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+        <span class="nc">EventLoopGroup</span> <span class="n">bossGroup</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">NioEventLoopGroup</span><span class="o">();</span> <span class="c1">// (1)</span>
+        <span class="nc">EventLoopGroup</span> <span class="n">workerGroup</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">NioEventLoopGroup</span><span class="o">();</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">ServerBootstrap</span> <span class="n">b</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ServerBootstrap</span><span class="o">();</span> <span class="c1">// (2)</span>
+            <span class="n">b</span><span class="o">.</span><span class="na">group</span><span class="o">(</span><span class="n">bossGroup</span><span class="o">,</span> <span class="n">workerGroup</span><span class="o">)</span>
+             <span class="o">.</span><span class="na">channel</span><span class="o">(</span><span class="nc">NioServerSocketChannel</span><span class="o">.</span><span class="na">class</span><span class="o">)</span> <span class="c1">// (3)</span>
+             <span class="o">.</span><span class="na">childHandler</span><span class="o">(</span><span class="k">new</span> <span class="nc">ChannelInitializer</span><span class="o">&lt;</span><span class="nc">SocketChannel</span><span class="o">&gt;()</span> <span class="o">{</span> <span class="c1">// (4)</span>
+                 <span class="nd">@Override</span>
+                 <span class="kd">public</span> <span class="kt">void</span> <span class="nf">initChannel</span><span class="o">(</span><span class="nc">SocketChannel</span> <span class="n">ch</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+                     <span class="n">ch</span><span class="o">.</span><span class="na">pipeline</span><span class="o">().</span><span class="na">addLast</span><span class="o">(</span><span class="k">new</span> <span class="nc">DiscardServerHandler</span><span class="o">());</span>
+                 <span class="o">}</span>
+             <span class="o">})</span>
+             <span class="o">.</span><span class="na">option</span><span class="o">(</span><span class="nc">ChannelOption</span><span class="o">.</span><span class="na">SO_BACKLOG</span><span class="o">,</span> <span class="mi">128</span><span class="o">)</span>          <span class="c1">// (5)</span>
+             <span class="o">.</span><span class="na">childOption</span><span class="o">(</span><span class="nc">ChannelOption</span><span class="o">.</span><span class="na">SO_KEEPALIVE</span><span class="o">,</span> <span class="kc">true</span><span class="o">);</span> <span class="c1">// (6)</span>
+    
+            <span class="nc">ChannelFuture</span> <span class="n">f</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="na">bind</span><span class="o">(</span><span class="n">port</span><span class="o">).</span><span class="na">sync</span><span class="o">();</span> <span class="c1">// (7)</span>
+    
+            <span class="n">f</span><span class="o">.</span><span class="na">channel</span><span class="o">().</span><span class="na">closeFuture</span><span class="o">().</span><span class="na">sync</span><span class="o">();</span>
+        <span class="o">}</span> <span class="k">finally</span> <span class="o">{</span>
+            <span class="n">workerGroup</span><span class="o">.</span><span class="na">shutdownGracefully</span><span class="o">();</span>
+            <span class="n">bossGroup</span><span class="o">.</span><span class="na">shutdownGracefully</span><span class="o">();</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+    
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">port</span> <span class="o">=</span> <span class="mi">8080</span><span class="o">;</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">args</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">port</span> <span class="o">=</span> <span class="nc">Integer</span><span class="o">.</span><span class="na">parseInt</span><span class="o">(</span><span class="n">args</span><span class="o">[</span><span class="mi">0</span><span class="o">]);</span>
+        <span class="o">}</span>
+
+        <span class="k">new</span> <span class="nf">DiscardServer</span><span class="o">(</span><span class="n">port</span><span class="o">).</span><span class="na">run</span><span class="o">();</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+
+</code></pre></div></div>
+
+<h3 id="summary">Summary</h3>
+
+<p>Here’s a brief summary of the Netty EventLoop framework, which is elegantly designed, organized and implemented.</p>
+
+<ol>
+  <li>You can bind several channels/sockets to one event loop.</li>
+  <li>An event loop is bound to exactly one thread that never changes.</li>
+  <li>Tasks can be submitted to the event loop for immediate or scheduled execution.</li>
+  <li>No thread pool is used.</li>
+</ol>
+
+<h3 id="references">References</h3>
+
+<ol>
+  <li><a href="https://netty.io/wiki/user-guide-for-4.x.html#wiki-h3-5">Netty.docs: User guide for 4.x</a></li>
+  <li><a href="https://github.com/netty/netty">GitHub - netty/netty: Netty project - an event-driven asynchronous network application framework</a></li>
+  <li><a href="https://my.oschina.net/andylucc/blog/618179">Netty精粹之基于EventLoop机制的高效线程模型 - Float_Luuu的个人空间 - OSCHINA</a></li>
+  <li><a href="https://zhuanlan.zhihu.com/p/103704402">Netty源码探究2：线程模型 - 知乎</a></li>
+</ol>
+
+:ET

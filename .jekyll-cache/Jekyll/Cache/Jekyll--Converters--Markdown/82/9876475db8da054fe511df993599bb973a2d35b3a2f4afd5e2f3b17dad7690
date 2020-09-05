@@ -1,0 +1,151 @@
+I"�R<p>Shared memories/variables are widely used in parallel programs. To ensure the correctness, concurrent access must be synchronized. It is commonly known using locks to guarantee exclusive access, yet locks are not free.</p>
+
+<!--more-->
+
+<ul>
+  <li>if a thread T is preempted while holding a lock, no thread that needs the lock can progress until T runs again and releases the lock.</li>
+  <li>if a low priority thread holds a lock is interrupted by an interrupt or signal handler that needs the lock, deadlock can occur since the lock is still held by the thread</li>
+</ul>
+
+<p>Using non-blocking data structures solves these problems. Non-blocking data structures are based on the idea that: every reachable concrete state of the data structure corresponds to a unique abstract state, and can serve as the starting point for any operation (or the continuation of any operation already underway). There is no reachable state in which a thread has to wait for action on the part of some other thread in order to make progress. And we will soon see the non-blocking queue implementation where the clean up state could be performed by any threads.</p>
+
+<h3 id="cas">CAS</h3>
+
+<p>To implement the non-blocking data structures, we take advantage of the hardware atomic primitive instructions. Being atomic means that a task either is completely done or is not done at all; there is no state like half done or half not done. These instructions include of course the loads and stores.</p>
+
+<p>There are also instructions to read, modify and rewrite memory locations as a single hardware atomic operation. Such instructions have different names depending on the CPU architectures. For example, on X86, Sparc, there is <code class="language-plaintext highlighter-rouge">bool compare_and_swap(a, e, n)</code> or <code class="language-plaintext highlighter-rouge">CAS</code> which will replace the word at address <code class="language-plaintext highlighter-rouge">a</code> with the value <code class="language-plaintext highlighter-rouge">n</code>, provided that it contained <code class="language-plaintext highlighter-rouge">e</code> before.</p>
+
+<p>Instruction <code class="language-plaintext highlighter-rouge">CAS</code> will return <code class="language-plaintext highlighter-rouge">true</code> if update is successful (value on address is not changed) and <code class="language-plaintext highlighter-rouge">false</code> otherwise. The typical idiom for <code class="language-plaintext highlighter-rouge">CAS</code> is:</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">do</span> <span class="o">{</span>
+  <span class="n">e</span> <span class="o">=</span> <span class="o">*</span><span class="n">a</span>
+  <span class="n">n</span> <span class="o">=</span> <span class="n">f</span><span class="o">(</span><span class="n">e</span><span class="o">)</span>
+<span class="o">}</span> <span class="k">while</span> <span class="o">(!</span><span class="no">CAS</span><span class="o">(</span><span class="n">a</span><span class="o">,</span> <span class="n">e</span><span class="o">,</span> <span class="n">n</span><span class="o">))</span>
+</code></pre></div></div>
+<p>Note that a while loop is used so that if the update fails the code will continue trying until it succeeds.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">CAS</code> alternatives on MIPS, ARM, RISC V, etc, are decomposed further to 2 atomic primitive instructions: <code class="language-plaintext highlighter-rouge">val load_linked(a)</code> which returns word at address <code class="language-plaintext highlighter-rouge">a</code> and tags the cache line as a side effect; <code class="language-plaintext highlighter-rouge">bool store_conditional(a, n)</code> which writes n to a if tagged line is still present.</p>
+
+<p>And the typical idiom for <code class="language-plaintext highlighter-rouge">LL</code> and <code class="language-plaintext highlighter-rouge">SC</code> is:</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">do</span> <span class="o">{</span>
+ <span class="n">e</span> <span class="o">=</span> <span class="no">LL</span><span class="o">(</span><span class="n">a</span><span class="o">)</span>
+ <span class="n">n</span> <span class="o">=</span> <span class="n">f</span><span class="o">(</span><span class="n">e</span><span class="o">)</span>
+<span class="o">}</span> <span class="k">while</span> <span class="o">(!</span><span class="no">SC</span><span class="o">(</span><span class="n">a</span><span class="o">,</span> <span class="n">n</span><span class="o">))</span>
+</code></pre></div></div>
+
+<p>These two mechanisms (i.e. <code class="language-plaintext highlighter-rouge">CAS</code> vs <code class="language-plaintext highlighter-rouge">LL,SC</code>) have pros/cons, yet it is beyond the scope of this article. And we will continue to focus on <code class="language-plaintext highlighter-rouge">CAS</code>.</p>
+
+<p>But <code class="language-plaintext highlighter-rouge">CAS</code> is not a panacea. One of the well known issues is the ABA problem with CAS. The ABA problem happens in case that the memory location value was A, then is changed to B, then changed back to a bitwise equal but semantically different value A. For<code class="language-plaintext highlighter-rouge">CAS</code> the value is still <code class="language-plaintext highlighter-rouge">A</code> and it assumes that nothing has changed at all. ABA problem does not bother LL/SC (using cache tag). We can use counted pointers to avoid ABA problems, i.e. <code class="language-plaintext highlighter-rouge">&lt;serial_no, addr&gt;</code> pair, and increase serial number on every change.</p>
+
+<h3 id="michael-scott-queue">Michael-Scott Queue</h3>
+
+<p>The Michael-Scott queue is one of the commonly applied non-blocking data structures. It is first mentioned  in the paper <code class="language-plaintext highlighter-rouge">Simple, Fast, and Practical Non-Blocking and Blocking Concurrent Queue Algorithms</code> published in 1996 by M. Michael and M. Scott. In this paper, the authors presented a non-blocking queue implementation with <code class="language-plaintext highlighter-rouge">CAS</code> which we are going to have a take a look at soon.</p>
+
+<p>In Java, the <code class="language-plaintext highlighter-rouge">CAS</code> operation is provided by <code class="language-plaintext highlighter-rouge">AtomicReference#compareAndSet</code>. We define our node and queue class as following:</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+<span class="kd">class</span> <span class="nc">Queue</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="o">{</span>
+
+  <span class="kd">class</span> <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="o">{</span>
+    <span class="no">E</span> <span class="n">item</span><span class="o">;</span>
+    <span class="nc">AtomicReference</span><span class="o">&lt;</span><span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;&gt;</span> <span class="n">next</span><span class="o">;</span>
+    <span class="nc">Node</span><span class="o">(</span><span class="no">E</span> <span class="n">item</span><span class="o">,</span> <span class="nc">AtomicReference</span><span class="o">&lt;</span><span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;&gt;</span> <span class="n">next</span><span class="o">)</span> <span class="o">{</span>
+      <span class="k">this</span><span class="o">.</span><span class="na">item</span> <span class="o">=</span> <span class="n">item</span><span class="o">;</span>
+      <span class="k">this</span><span class="o">.</span><span class="na">next</span> <span class="o">=</span> <span class="n">next</span><span class="o">;</span>
+    <span class="o">}</span> 
+  <span class="o">}</span>
+  
+  <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">dummy</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Node</span><span class="o">&lt;&gt;(</span><span class="kc">null</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
+  <span class="nc">AtomicReference</span><span class="o">&lt;</span><span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;&gt;</span> <span class="n">head</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">AtomicReference</span><span class="o">&lt;&gt;(</span><span class="n">dummy</span><span class="o">);</span>
+  <span class="nc">AtomicReference</span><span class="o">&lt;</span><span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;&gt;</span> <span class="n">tail</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">AtomicReference</span><span class="o">&lt;&gt;(</span><span class="n">dummy</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h5 id="enqueue">Enqueue</h5>
+
+<p>As we know, a queue is defined by two operations, i.e. <code class="language-plaintext highlighter-rouge">enqueue</code> and <code class="language-plaintext highlighter-rouge">dequeue</code>. For the non-blocking queue, they are a little more complicated. The <code class="language-plaintext highlighter-rouge">enqueue</code> is now a two-step operation:</p>
+
+<ol>
+  <li>CAS next pointer of tail node to new node</li>
+  <li>Use CAS to swing the tail pointer</li>
+</ol>
+
+<p>In the algorithm <code class="language-plaintext highlighter-rouge">enqueue</code>, we first create a new node <code class="language-plaintext highlighter-rouge">newNode</code>. In the loop, we read the tail node <code class="language-plaintext highlighter-rouge">currentTail</code> and the successor of <code class="language-plaintext highlighter-rouge">currentTails</code> which is named as <code class="language-plaintext highlighter-rouge">tailNext</code>.</p>
+
+<p>During the process reading the tail node and the it’s successor, there’s possibility that some other threads change either or even both of them (finished either 1st step or all two steps of the enqueue process). And we need to consider all the possibilities to make sure the algorithm is correct.</p>
+
+<ol>
+  <li>If some other thread T has already finished enqueue, the <code class="language-plaintext highlighter-rouge">currentTail</code> becomes obsolete and is no longer equal to <code class="language-plaintext highlighter-rouge">tail.get()</code>, i.e. <code class="language-plaintext highlighter-rouge">currentTail != tail.get()</code> (tail pointer has been swang to some new node appended by thread T). In this case, we need to return to the beginning of the loop and reread the tail node.</li>
+  <li>If some other thread T has just finished the first step of enqueue, i.e. append a new node to the tail, but not yet updates the tail pointer (<code class="language-plaintext highlighter-rouge">currentTail == tail.get() &amp;&amp; tailNext != null</code> ). The tail pointer points to some node whose successor is non trivial, it means we need to do some clean up (to finish step 2) and any thread can do the clean up on behalf of any thread.</li>
+  <li>If the <code class="language-plaintext highlighter-rouge">tailNext</code> is null and <code class="language-plaintext highlighter-rouge">currentTail</code> equals to <code class="language-plaintext highlighter-rouge">tail.get()</code>, we can try to add the <code class="language-plaintext highlighter-rouge">newNode</code> to the queue tail by <code class="language-plaintext highlighter-rouge">currentTail.next.compareAndSet(null, newNode)</code>. If this <code class="language-plaintext highlighter-rouge">CAS</code> fails, we restart the loop. And if it succeeds, we can continue to swing the tail pointer <code class="language-plaintext highlighter-rouge">tail.compareAndSet(currentTail, newNode)</code>, and note that 2hen we CAS the tail pointer to the new node, and if it fails, we just don’t care, because it means some other thread has already done it on our behalf!</li>
+</ol>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kt">void</span> <span class="nf">enqueue</span><span class="o">(</span><span class="no">E</span> <span class="n">item</span><span class="o">)</span> <span class="o">{</span>
+  <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">newNode</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Node</span><span class="o">&lt;&gt;(</span><span class="n">item</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
+  <span class="k">while</span> <span class="o">(</span><span class="kc">true</span><span class="o">)</span> <span class="o">{</span> <span class="c1">// keep trying</span>
+    <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">currentTail</span> <span class="o">=</span> <span class="n">tail</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+    <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">tailNext</span> <span class="o">=</span> <span class="n">currentTail</span><span class="o">.</span><span class="na">next</span><span class="o">.</span><span class="na">get</span><span class="o">();</span> <span class="c1">// if no other threads change the tail, it should be null </span>
+  <span class="c1">// snapshot taken, now </span>
+  <span class="k">if</span> <span class="o">(</span><span class="n">currentTail</span> <span class="o">==</span> <span class="n">tail</span><span class="o">.</span><span class="na">get</span><span class="o">())</span> <span class="o">{</span> <span class="c1">// no body changed the tail pointer yet, so it can continue</span>
+      <span class="k">if</span> <span class="o">(</span><span class="n">tailNext</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span> <span class="c1">// oops, someone has already added a node to the end</span>
+        <span class="n">tail</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="n">currentTail</span><span class="o">,</span> <span class="n">tailNext</span><span class="o">)</span> <span class="c1">//OK, I do the clean-up,try to update tail pointer </span>
+      <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">currentTail</span><span class="o">.</span><span class="na">next</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="kc">null</span><span class="o">,</span> <span class="n">newNode</span><span class="o">))</span> <span class="o">{</span> <span class="c1">// add new node to tail</span>
+          <span class="n">tail</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="n">currentTail</span><span class="o">,</span> <span class="n">newNode</span><span class="o">)</span> <span class="c1">// try to update tail pointer, if it fails? we don't care</span>
+          <span class="k">return</span><span class="o">;</span>
+        <span class="o">}</span>
+      <span class="o">}</span>
+    <span class="o">}</span>
+  <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h5 id="dequeue">Dequeue</h5>
+
+<p>For the dequeue operation, if we look at the head and tail and if they are different, we can safely dequeue, otherwise we have to discriminate between the cases: the queue is empty <code class="language-plaintext highlighter-rouge">next == null</code>; some other thread just finished step 1 of enqueue, and we will do the clean up on its behalf <code class="language-plaintext highlighter-rouge">tail.compareAndSet(last, next)</code>.</p>
+
+<p>Generally, the dequeue operation can be summarized as the following 4 steps:</p>
+
+<ol>
+  <li>Read data in dummy’s next node</li>
+  <li>CAS head pointer to dummy’s next node</li>
+  <li>Discard old dummy node</li>
+  <li>Node from which we read is the new dummy node</li>
+</ol>
+
+<p>Note that the item value has to be read before CAS, because once the CAS is done, any other thread is allowed to do a dequeue which will remove the node which we want to read value from. That’s the reason why we have <code class="language-plaintext highlighter-rouge">E item = next.item</code> before <code class="language-plaintext highlighter-rouge">head.compareAndSet(first, next)</code>.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="no">E</span> <span class="nf">dequeue</span><span class="o">()</span> <span class="o">{</span>
+  <span class="k">while</span> <span class="o">(</span><span class="kc">true</span><span class="o">)</span> <span class="o">{</span>
+    <span class="c1">// take a snapshot</span>
+    <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">first</span> <span class="o">=</span> <span class="n">head</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+    <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">last</span> <span class="o">=</span> <span class="n">tail</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+    <span class="nc">Node</span><span class="o">&lt;</span><span class="no">E</span><span class="o">&gt;</span> <span class="n">next</span> <span class="o">=</span> <span class="n">first</span><span class="o">.</span><span class="na">next</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+    
+    <span class="k">if</span> <span class="o">(</span><span class="n">first</span> <span class="o">==</span> <span class="n">head</span><span class="o">.</span><span class="na">get</span><span class="o">())</span> <span class="o">{</span> <span class="c1">// nobody changed the head yet </span>
+      <span class="k">if</span> <span class="o">(</span><span class="n">first</span> <span class="o">==</span> <span class="n">last</span><span class="o">)</span> <span class="o">{</span> <span class="c1">// empty or some other thread executed step 1 of enqueue</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">next</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">return</span> <span class="kc">null</span><span class="o">;</span> <span class="c1">// empty</span>
+        <span class="n">tail</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="n">last</span><span class="o">,</span> <span class="n">next</span><span class="o">);</span> <span class="c1">// we do the clean up </span>
+      <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+        <span class="no">E</span> <span class="n">item</span> <span class="o">=</span> <span class="n">next</span><span class="o">.</span><span class="na">item</span><span class="o">;</span> 
+        <span class="k">if</span> <span class="o">(</span><span class="n">head</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="n">first</span><span class="o">,</span><span class="n">next</span><span class="o">))</span> <span class="o">{</span>
+          <span class="k">return</span> <span class="n">item</span><span class="o">;</span>
+        <span class="o">}</span>
+      <span class="o">}</span>
+    <span class="o">}</span>
+  <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h3 id="concurrentlinkedqueue">ConcurrentLinkedQueue</h3>
+
+<p>As the old saying goes, “Don’t reinvent wheels,” Java offers us the <code class="language-plaintext highlighter-rouge">ConcurrentLinkedQueue</code> that, I quote from the Java Doc:</p>
+
+<blockquote>
+  <p>The implementation employs an efficient “wait-free” algorithm based on one described in Simple, Fast, and Practical Non-Blocking and Blocking Concurrent Queue Algorithms by Maged M. Michael and Michael L. Scott</p>
+</blockquote>
+
+<p>If there is any difficulty in understanding the <code class="language-plaintext highlighter-rouge">CAS</code>, just use the <code class="language-plaintext highlighter-rouge">ConcurrentLinkedQueue</code>, enjoy and have fun!</p>
+
+:ET

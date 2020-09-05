@@ -1,0 +1,2 @@
+I"â<p>Shared memories/variables are widely used in parallel programs. To ensure the correctness, concurrent access must be synchronized. It is commonly known using locks to guarantee exclusive access, yet locks are not free.</p>
+:ET
