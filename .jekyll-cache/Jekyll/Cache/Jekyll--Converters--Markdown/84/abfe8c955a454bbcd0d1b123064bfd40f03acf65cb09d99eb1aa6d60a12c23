@@ -1,4 +1,4 @@
-I"`‡<p>An event loop is an infinite loop running on a single thread for handling events that occur during the lifetime of one or more connections.</p>
+I"c‡<p>An event loop is an infinite loop running on a single thread for handling events that occur during the lifetime of one or more connections.</p>
 
 <!--more-->
 
@@ -10,7 +10,7 @@
 
 <p>The two Netty packages have a clear boundary of functionalities. The package <code class="language-plaintext highlighter-rouge">io.netty.util.concurrent</code> takes care of the threads and provides an abstraction of the thread model, while the <code class="language-plaintext highlighter-rouge">io.netty.channel</code> takes care of the <code class="language-plaintext highlighter-rouge">Channel</code> and <code class="language-plaintext highlighter-rouge">Selector</code>.</p>
 
-<p><img src="/img/uml_event_loop.png" alt="Event Loop UML" /></p>
+<p><img src="/images/uml_event_loop.png" alt="Event Loop UML" /></p>
 
 <p>Starting from the root <code class="language-plaintext highlighter-rouge">Executor</code> to the end <code class="language-plaintext highlighter-rouge">NioEventLoop</code>, there is the inheritance path of abstract classes of executors, event loops on the left column, the interfaces in the middle, and executor groups and event loop groups on the right.</p>
 

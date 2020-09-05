@@ -17,7 +17,7 @@ Although the Netty API seems to be very complicated, the classes/interfaces rela
 The two Netty packages have a clear boundary of functionalities. The package `io.netty.util.concurrent` takes care of the threads and provides an abstraction of the thread model, while the `io.netty.channel` takes care of the `Channel` and `Selector`.
 
 
-![Event Loop UML]({{ site.baseurl }}/img/uml_event_loop.png)
+![Event Loop UML]({{ site.baseurl }}/images/uml_event_loop.png)
 
 
 Starting from the root `Executor` to the end `NioEventLoop`, there is the inheritance path of abstract classes of executors, event loops on the left column, the interfaces in the middle, and executor groups and event loop groups on the right.
