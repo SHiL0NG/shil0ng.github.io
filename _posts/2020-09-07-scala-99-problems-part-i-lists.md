@@ -542,7 +542,7 @@ def slice[T](from: Int, to: Int, list: List[T]): List[T] = list.drop(from).take(
 slice(3, 7, List('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j, 'k))
 ```
 
-### 19. Rotate a list N places to the left.
+## 19. Rotate a list N places to the left.
 Examples:
 ```
 scala> rotate(3, List('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j, 'k))

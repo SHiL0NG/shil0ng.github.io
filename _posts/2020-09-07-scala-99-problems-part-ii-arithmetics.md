@@ -5,7 +5,7 @@ layout: post
 
 Exercise solutions for `Scala 99 Problems, Part II Arithmetics.`
 
-# 31. Determine whether a given integer number is prime.
+## 31. Determine whether a given integer number is prime.
 ```
 scala> 7.isPrime
 res0: Boolean = true
@@ -152,7 +152,7 @@ res0: Map[Int,Int] = Map(3 -> 2, 5 -> 1, 7 -> 1)
   315.primeFactorsMultiplicity2
 ```
 
-### 37. Calculate Euler's totient function phi(m) (improved).
+## 37. Calculate Euler's totient function phi(m) (improved).
 
 
 
@@ -209,7 +209,7 @@ import P40._
 
 ```
 
-### 41. A list of Goldbach compositions.
+## 41. A list of Goldbach compositions.
 Given a range of integers by its lower and upper limit, print a list of all even numbers and their Goldbach composition.
 ```
 scala> printGoldbachList(9 to 20)
