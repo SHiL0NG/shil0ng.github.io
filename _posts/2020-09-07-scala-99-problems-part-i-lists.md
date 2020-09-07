@@ -3,7 +3,7 @@ title: Scala Lists
 layout: post
 ---
 
-Exercise solutions for `Scala 99 Problems, Part I Lists`
+Exercise solutions for `Scala 99 Problems, Part I Lists.`
 
 ## 1. Find the last element of a list.
 
