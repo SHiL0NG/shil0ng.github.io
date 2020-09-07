@@ -4,6 +4,7 @@ layout: post
 ---
 
 Exercise solutions for `Scala 99 Problems, Part II Arithmetics.`
+
 # 31. Determine whether a given integer number is prime.
 ```
 scala> 7.isPrime
