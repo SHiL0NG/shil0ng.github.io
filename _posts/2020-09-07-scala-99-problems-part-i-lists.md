@@ -12,7 +12,7 @@ Example:
 scala> last(List(1, 1, 2, 3, 5, 8))
 res0: Int = 8
 ```
-Note that here I've chosen `Option[A]` as return type instead of `null` or `throw new Exception`
+Note that here I've chosen `Option[A]` as the return type instead of `null` or `throw new Exception`
 
 - reverse and take head, pattern match
 
@@ -61,7 +61,7 @@ Example:
 scala> penultimate(List(1, 1, 2, 3, 5, 8))
 res0: Int = 5
 ```
-Again, here I will use `Option[A]` as return type instead of the plain integer or whatever
+Again, here I will use `Option[A]` as the return type instead of the plain integer or whatever
 
 - Intuitive solution
 
@@ -387,7 +387,7 @@ encodeModified(List('a, 'a, 'a, 'a, 'b, 'c, 'c, 'a, 'a, 'd, 'e, 'e, 'e, 'e))
 
 - be type safe
 
-As always, I do not like `Any`, we could use `List[Either[(Int, T), T]]` as return type.
+As always, I do not like `Any`, we could use `List[Either[(Int, T), T]]` as the return type.
 
 
 ```scala
@@ -865,7 +865,7 @@ Example:
 scala> lsortFreq(List(List('a, 'b, 'c), List('d, 'e), List('f, 'g, 'h), List('d, 'e), List('i, 'j, 'k, 'l), List('m, 'n), List('o)))
 res1: List[List[Symbol]] = List(List('i, 'j, 'k, 'l), List('o), List('a, 'b, 'c), List('f, 'g, 'h), List('d, 'e), List('d, 'e), List('m, 'n))
 ```
-Note that in the above example, the first two lists in the result have length 4 and 1 and both lengths appear just once. The third and fourth lists have length 3 and there are two list of this length. Finally, the last three lists have length 2. This is the most frequent length.
+Note that in the above example, the first two lists in the result have length 4 and 1 and both lengths appear just once. The third and fourth lists have length 3 and there are two lists of this length. Finally, the last three lists have length 2. This is the most frequent length.
 
 
 ```scala
