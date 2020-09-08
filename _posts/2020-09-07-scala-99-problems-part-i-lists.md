@@ -3,7 +3,7 @@ title: Scala Lists
 layout: post
 ---
 
-Exercise solutions for `Scala 99 Problems, Part I Lists.`
+Exercise solutions for `Scala 99 Problems.`
 
 ## 1. Find the last element of a list.
 
@@ -877,3 +877,409 @@ def lsortFreq[T](list: List[List[T]]): List[List[T]] = {
 }
 ```
 
+## 31. Determine whether a given integer number is prime.
+```
+scala> 7.isPrime
+res0: Boolean = true
+```
+
+
+```scala
+object P31 {
+  import java.lang.Math
+
+  implicit class PrimeChecker(n: Int) {
+    def isPrime(): Boolean = {
+      if (n < 2) false
+      else !(2 to Math.sqrt(n).toInt).exists(n % _ == 0)
+    }
+  }
+    
+}
+
+import P31._
+
+7.isPrime
+13.isPrime
+81.isPrime
+```
+
+## 32. Determine the greatest common divisor of two positive integer numbers.
+Use Euclid's algorithm.
+```
+scala> gcd(36, 63)
+res0: Int = 9
+```
+
+
+```scala
+  def gcd(a: Int, b: Int): Int = {
+    if (b == 0) a
+    else gcd(b,  a % b)
+  }
+  gcd(93, 42)
+
+  gcd(0, 10)
+```
+
+## 33. Determine whether two positive integer numbers are coprime.
+Two numbers are coprime if their greatest common divisor equals 1.
+
+```
+scala> 35.isCoprimeTo(64)
+res0: Boolean = true
+```
+
+
+```scala
+
+  def gcd(a: Int, b: Int): Int = {
+    if (b == 0) a
+    else gcd(b,  a % b)
+  }
+  
+  implicit def fromIntToCoPrimeValidator(v: Int) = CoPrimeValidator(v)
+  
+  case class CoPrimeValidator(v: Int) {
+    def isCoPrimeTo(another: Int): Boolean = 1 == gcd(v, another)
+  }
+
+
+  12.isCoPrimeTo(45)
+  12.isCoPrimeTo(35)
+```
+
+## 34. Calculate Euler's totient function phi(m).
+Euler's so-called totient function phi(m) is defined as the number of positive integers r (1 <= r <= m) that are coprime to m.
+```
+scala> 10.totient
+res0: Int = 4
+```
+
+
+```scala
+  implicit def integerToEulerTotientCal(n: Int): EulerTotientCal = EulerTotientCal(n)
+
+  case class EulerTotientCal(n: Int) {
+    def totient: Int = (1 to n).count(_.isCoPrimeTo(n))
+  }
+
+  10.totient
+  315.totient
+```
+
+## 35. Determine the prime factors of a given positive integer.
+Construct a flat list containing the prime factors in ascending order.
+
+```
+scala> 315.primeFactors
+res0: List[Int] = List(3, 3, 5, 7)
+```
+
+
+
+```scala
+  implicit def integerToPrimeFactor(n: Int): PrimeFactor = PrimeFactor(n)
+
+  case class PrimeFactor(n: Int) {
+    def primeFactors: List[Int] = primeFactors(2, n)
+
+    def primeFactors(f: Int, n: Int): List[Int] = {
+      if (n == 1) List()
+      else if (n % f == 0) f :: primeFactors(f, n/f)
+      else primeFactors(f + 1, n)
+    }
+  }
+  315.primeFactors
+```
+
+## 36. Determine the prime factors of a given positive integer (2).
+Construct a list containing the prime factors and their multiplicity.
+
+```
+scala> 315.primeFactorMultiplicity
+res0: List[(Int, Int)] = List((3,2), (5,1), (7,1))
+```
+Alternately, use a Map for the result.
+```
+scala> 315.primeFactorMultiplicity
+res0: Map[Int,Int] = Map(3 -> 2, 5 -> 1, 7 -> 1)
+```
+
+
+
+```scala
+  implicit def integerToPrimeFactorsMap(n: Int): PrimeFactorsMap = PrimeFactorsMap(n)
+
+  case class PrimeFactorsMap(n: Int) {
+    def primeFactorsMultiplicity: Map[Int, Int] =
+      // reuse primeFactors
+      n.primeFactors.groupBy(identity).mapValues(_.size)
+
+    def primeFactorsMultiplicity2: Map[Int, Int] =
+      n.primeFactors.foldLeft(Map[Int, Int]() withDefaultValue 0)((m, i) => m.updated(i, m(i) + 1))
+  }
+
+  315.primeFactorsMultiplicity
+  315.primeFactorsMultiplicity2
+```
+
+## 37. Calculate Euler's totient function phi(m) (improved).
+
+
+
+```scala
+  implicit def intToEulerTotientImproved(v: Int): EulersTotientImproved = EulersTotientImproved(v)
+
+  case class EulersTotientImproved(value: Int) {
+    def totientImproved: Int = {
+      import java.lang.Math
+      value.primeFactorsMultiplicity.foldLeft(1)((r, t) => r * (t._1 - 1) * Math.pow(t._1, t._2 - 1).toInt)
+    }
+  }
+
+  315.totientImproved
+```
+
+## 39.  A list of prime numbers.
+Given a range of integers by its lower and upper limit, construct a list of all prime numbers in that range.
+```
+scala> listPrimesinRange(7 to 31)
+res0: List[Int] = List(7, 11, 13, 17, 19, 23, 29, 31)
+```
+
+
+```scala
+import P31._ 
+
+def listPrimesInRange(range: Range): List[Int] = range.filter(_.isPrime).toList
+
+listPrimesInRange(1 to 100)
+```
+
+## 40. Goldbach's conjecture.
+Goldbach's conjecture says that every positive even number greater than 2 is the sum of two prime numbers. E.g. 28 = 5 + 23. It is one of the most famous facts in number theory that has not been proved to be correct in the general case. It has been numerically confirmed up to very large numbers (much larger than Scala's Int can represent). Write a function to find the two prime numbers that sum up to a given even integer.
+```
+scala> 28.goldbach
+res0: (Int, Int) = (5,23)
+```
+
+
+```scala
+object P40 {
+ implicit class GoldbachInt(value: Int) {
+    import P31._
+    def goldbach: (Int, Int) = {
+      (2 to value).find(p => p.isPrime && (value -p).isPrime).map(p => (p, value - p)).get
+    }
+  }
+}
+
+import P40._
+
+28.goldbach
+
+```
+
+## 41. A list of Goldbach compositions.
+Given a range of integers by its lower and upper limit, print a list of all even numbers and their Goldbach composition.
+```
+scala> printGoldbachList(9 to 20)
+10 = 3 + 7
+12 = 5 + 7
+14 = 3 + 11
+16 = 3 + 13
+18 = 5 + 13
+20 = 3 + 17
+```
+In most cases, if an even number is written as the sum of two prime numbers, one of them is very small. Very rarely, the primes are both bigger than, say, 50. Try to find out how many such cases there are in the range 2..3000.
+
+Example (minimum value of 50 for the primes):
+```
+scala> printGoldbachListLimited(1 to 2000, 50)
+992 = 73 + 919
+1382 = 61 + 1321
+1856 = 67 + 1789
+1928 = 61 + 1867
+```
+
+
+```scala
+  def printGoldbachList(range: Range): List[(Int, Int)] = {
+    import P40._
+    range.filter(p => p > 2 && p % 2 == 0).map(v => v.goldbach).toList
+  }
+
+  def printGoldbachListLimited(range: Range, limit: Int): List[(Int, Int)] = {
+    printGoldbachList(range).filter(a => a._1 > limit)
+  }
+  printGoldbachListLimited(1 to 2000, 50)
+  printGoldbachList(9 to 20)
+```
+
+
+## 46. Truth tables for logical expressions.
+Define functions and, or, nand, nor, xor, impl, and equ (for logical equivalence) which return true or false according to the result of their respective operations; e.g. and(A, B) is true if and only if both A and B are true.
+```
+scala> and(true, true)
+res0: Boolean = true
+
+scala> xor(true. true)
+res1: Boolean = false
+```
+A logical expression in two variables can then be written as an function of two variables, e.g: (a: Boolean, b: Boolean) => and(or(a, b), nand(a, b))
+
+Now, write a function called table2 which prints the truth table of a given logical expression in two variables.
+```
+scala> table2((a: Boolean, b: Boolean) => and(a, or(a, b)))
+A     B     result
+true  true  true
+true  false true
+false true  false
+false false false
+```
+
+
+```scala
+  def and(a: Boolean, b: => Boolean): Boolean = if (a) b else false
+
+  def or(a: Boolean, b: => Boolean): Boolean = if (a) true else b
+
+  def not(a: Boolean): Boolean = if (a) false else true
+
+  def equ(a: Boolean, b: Boolean): Boolean = or(and(a, b), and(not(a), not(b)))
+
+  def xor(a: Boolean, b: Boolean): Boolean = not(equ(a,b))
+
+  def impl(a: Boolean, b: => Boolean): Boolean = if (a) b else true
+
+  def nand(a: Boolean, b: Boolean): Boolean = not(and(a, b))
+
+  val f: (Boolean, Boolean) => Boolean = (a, b) => and(a, xor(a, b))
+
+  def table2(f: (Boolean, Boolean) => Boolean): List[(Boolean, Boolean, Boolean)] = {
+    List(true, false).flatMap(a => List(true, false).map(b => (a, b, f(a, b))))
+  }
+  table2((a: Boolean, b: Boolean) => and(a, or(a, b)))
+```
+
+## 47. Truth tables for logical expressions (2).
+Continue problem P46 by redefining and, or, etc as operators. (i.e. make them methods of a new class with an implicit conversion from Boolean.) not will have to be left as a object method.
+
+```
+scala> table2((a: Boolean, b: Boolean) => a and (a or not(b)))
+A     B     result
+true  true  true
+true  false true
+false true  false
+false false false
+```
+
+
+```scala
+object P47 {
+  implicit class BooleanWrapper(a: Boolean) {
+    def and(b: => Boolean): Boolean  = if (a) b else false
+    def or(b: => Boolean): Boolean   = if (a) true else b
+    def nand(b: => Boolean): Boolean = if (a) !b else true
+    def nor(b: => Boolean): Boolean  = if (a) false else !b
+    def xor(b: Boolean): Boolean     = a != b
+    def impl(b: => Boolean): Boolean = if (a) b else true
+    def equ(b: Boolean): Boolean     = a == b
+  }
+}
+
+import P47._
+table2((a: Boolean, b: Boolean) => a and (a or not(b)))
+```
+
+## 48. Truth tables for logical expressions (3).
+Omitted for now.
+
+## 49. Gray code.
+An n-bit Gray code is a sequence of n-bit strings constructed according to certain rules. For example,
+```
+n = 1: C(1) = ("0", "1").
+n = 2: C(2) = ("00", "01", "11", "10").
+n = 3: C(3) = ("000", "001", "011", "010", "110", "111", "101", "100").
+```
+Find out the construction rules and write a function to generate Gray codes.
+```
+scala> gray(3)
+res0 List[String] = List(000, 001, 011, 010, 110, 111, 101, 100)
+See if you can use memoization to make the function more efficient.
+```
+
+
+```scala
+def gray(n: Int): List[String] = {
+  if (n == 1) List("0", "1")
+  else gray(n - 1).map("0" + _) ++ gray(n - 1).reverse.map("1" + _)
+}
+
+gray(3)
+gray(4)
+```
+
+## 50. Huffman code.
+First of all, consult a good book on discrete mathematics or algorithms for a detailed description of Huffman codes!
+We suppose a set of symbols with their frequencies, given as a list of (S, F) Tuples. E.g. `(("a", 45), ("b", 13), ("c", 12), ("d", 16), ("e", 9), ("f", 5))`. Our objective is to construct a list of `(S, C)` Tuples, where C is the Huffman code word for the symbol S.
+
+```
+scala> huffman(List(("a", 45), ("b", 13), ("c", 12), ("d", 16), ("e", 9), ("f", 5)))
+res0: List[String, String] = List((a,0), (b,101), (c,100), (d,111), (e,1101), (f,1100))
+```
+
+Algorithm implementation adapted from `Algorithms, 4th Edidtion, R. Sedgewick`
+
+- build an encoding trie
+- write the trie (encoded as a bitstream) for use in expansion (not required here for this problem)
+- use the trie to encode the bytestream as a bitstream
+
+
+```scala
+ import scala.collection.mutable
+
+  def huffman(input: List[(Char, Int)]) : mutable.Map[Char, String] = {
+    val root = buildTrie(input)
+    val map = mutable.Map[Char, String]().withDefaultValue("")
+    def buildCode(trie: Node, s: String):Unit = {
+      if (trie.isLeaf) map.put(trie.c, s)
+      if (trie.left != null) buildCode(trie.left, s + "0")
+      if (trie.right != null) buildCode(trie.right, s + "1")
+    }
+    buildCode(root, "")
+    map
+  }
+
+
+  case class Node(c: Char, freq: Int, left: Node, right: Node) {
+    def isLeaf: Boolean = left == null && right == null
+  }
+
+  object NodeOrdering extends Ordering[Node] {
+    override def compare(x: Node, y: Node): Int = y.freq compare x.freq
+  }
+
+  def buildTrie(input: List[(Char, Int)]): Node = {
+    // min heap
+    val pq = mutable.PriorityQueue()(NodeOrdering)
+    input.foreach(t => pq.enqueue(Node(t._1, t._2, null, null)))
+    while(pq.size > 1) {
+      val left = pq.dequeue()
+      val right = pq.dequeue()
+      val parent = Node('\0', left.freq + right.freq, left, right)
+      pq.enqueue(parent)
+    }
+    pq.dequeue()
+  }
+
+
+  val input = List(('A', 12), ('B', 23), ('C', 8), ('D', 17))
+
+  println(huffman(input))
+
+  val input2 = List(('a', 45), ('b', 13), ('c', 12), ('d', 16), ('e', 9), ('f', 5))
+
+  println(huffman(input2))
+```
