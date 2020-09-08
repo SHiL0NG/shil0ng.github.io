@@ -3,7 +3,8 @@ title: Scala 99 Problems
 layout: post
 ---
 
-Exercise solutions for `Scala 99 Problems.`
+Exercise solutions for `Scala 99 Problems.` The GitLab link for the Jupyter notebooks is [here.](https://gitlab.com/shilongzhao/fpinscala-jupyter/-/tree/master/scala_s99)
+
 
 ## 1. Find the last element of a list.
 
