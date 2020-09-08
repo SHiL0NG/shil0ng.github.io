@@ -1,5 +1,5 @@
 ---
-title: Scala Lists
+title: Scala 99 Problems
 layout: post
 ---
 
